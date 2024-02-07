@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator
 import torch.optim.lr_scheduler as lr_scheduler
+import os
 # Seed for randomizzation
 SEED = 444
 
@@ -155,7 +156,7 @@ def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
     moving_loss = moving_loss(xi, yi, ui, tau, h)
     ener_loss = energy_loss(xg, yg, h)
     bound_loss = boundary_loss(xb,yb)
-    loss = ener_loss + ngpt*bound_loss + moving_loss
+    loss = ener_loss + moving_loss
     
     return loss, ener_loss, bound_loss, moving_loss
  
@@ -240,6 +241,8 @@ def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss
     
     if epoch%100 == 0:
         print('Energy Loss:',ener_loss.detach().numpy(),', Bound Loss:',bound_loss.detach().numpy(),', Moving Loss:',moving_loss.detach().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
+        temp = [loss_value, ener_loss.detach().numpy(),bound_loss.detach().numpy(),moving_loss.detach().numpy()]
+        lossVal.append(temp)
     
     loss_spinn.backward()
     
@@ -248,7 +251,7 @@ def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss
     
     return loss_spinn
 
-def train_step_icgl(loss_fn,optimizer,epoch,train_data_icgl):
+def train_step_icgl(loss_fn,optimizer,epoch,lossVal_icgl,train_data_icgl):
     # clear the gradients
     optimizer.zero_grad()
     
@@ -258,6 +261,9 @@ def train_step_icgl(loss_fn,optimizer,epoch,train_data_icgl):
     
     if epoch%1000 == 0:
         print(' Total Loss:',loss_value, ', iter:', epoch)
+        
+    if epoch%100 == 0:
+        lossVal_icgl.append(loss_value)
     
     loss_ic.backward()
     
@@ -286,7 +292,7 @@ keys =  [g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED)
 
 
 # dataset
-nc = 512 # user input
+nc = 1024 # user input
 dom = [0, 1]
 
 # User Input for Size of Neural Network
@@ -294,8 +300,8 @@ input_size = 1  # You can change this to the desired number of input features
 hidden_sizes = [128, 128, 128, 128]  # You can specify the number of neurons in each hidden layer
 output_size = 256
 epochs_icgl = 5001
-epochs_pinn = 501
-epochs_pinn_init = 2001
+epochs_pinn = 2001
+epochs_pinn_init = 10001
 tau = 2E-6
 activation = 'gelu' # Choose either tanh or gelu
 N = 512
@@ -320,6 +326,7 @@ scheduler_init = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_
 scheduler_icgl = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_icgl)
 lbfgs = optim.LBFGS(spinn.parameters(), history_size=4, max_iter=10) 
 lossVal = []
+lossVal_icgl = []
 sol_list = []
 upred = []
 start = time.time()
@@ -327,7 +334,7 @@ start = time.time()
 for epoch in range(epochs_icgl):
         start_time = time.time()
         loss_fn = icgl_loss
-        train_step_icgl(loss_fn,adam,epoch,train_data_icgl)
+        train_step_icgl(loss_fn,adam,epoch,lossVal_icgl,train_data_icgl)
         scheduler_icgl.step()
         
 upred.append(spinn(xgrid.reshape(N,1),ygrid.reshape(N,1)))   
@@ -385,11 +392,11 @@ checkpt = {'model_params':spinn.state_dict(),
                     }
 torch.save(checkpt,'AC_2D_SinCos_Working.pt')
 #%% Plotting results for Deep Ritz Testing
-step = 102
+step = 100
 
 N = 512
-xgrid = torch.linspace(-1, 1, N).resize(N,1)
-ygrid = torch.linspace(-1, 1, N).resize(N,1)
+xgrid = torch.linspace(0, 1, N).resize(N,1)
+ygrid = torch.linspace(0, 1, N).resize(N,1)
 xmesh, ymesh = np.meshgrid(xgrid.detach().numpy(),ygrid.detach().numpy())
 ypred = upred[step-1]
 
@@ -482,13 +489,31 @@ _, _, xg, yg, _, _, h = spinn_train_generator_AC2D(512,[-1,1])
 f = torch.matmul((xg**2),(yg.T**2))
 g = torch.sum((h**2)*f)
 #%% Saving the Solution
+try:
+    os.makedirs('./results_data_aux/AC_2D_IC1')
+except:
+    pass
+
+os.chdir('./results_data_aux/AC_2D_IC1')        
+
 import scipy.io
 u_pred = []
 for u in upred:
     u_pred.append(u.detach().numpy())
 
 uu = {'upred':u_pred}
-scipy.io.savemat('upred_2D_sincos.mat',uu)
+scipy.io.savemat('upred_2D_IC1.mat',uu)
+
+
+loss_array_icgl = np.array(lossVal_icgl)
+loss_array = np.array(lossVal)
+
+loss_dict_icgl = {'loss_icgl':loss_array_icgl}
+scipy.io.savemat('loss_icgl.mat',loss_dict_icgl)
+
+loss_dict = {'loss_spinn':loss_array}
+scipy.io.savemat('loss_spinn.mat',loss_dict)
+
 
 
 

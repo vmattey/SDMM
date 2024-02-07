@@ -414,50 +414,6 @@ ax.set_ylabel('Y')
 
 fig.colorbar(surf, shrink=0.5, aspect=5)
 
-
-#%% Plotting the results
-
-def plot_ac(xtrain,uexact,upred,t_val):
-  plt.figure()
-  plt.scatter(xtrain,uexact,label='exact')       
-  plt.scatter(xtrain,upred.detach().numpy(),label='predicted')
-  plt.legend(loc=1) 
-  plt.title(f"t = {t_val}")   
-  plt.show()
-  
-def plot_ac_cmap(x,t,uexact,upred):
-    tmesh,xmesh = np.meshgrid(t,x)
-    upred = upred.detach().numpy()
-    plt.figure()
-    plt.pcolor(tmesh,xmesh,upred,cmap='coolwarm')
-    plt.title('Predicted')
-    plt.figure()
-    plt.pcolor(tmesh,xmesh,uexact,cmap='coolwarm')
-    plt.title('Exact')
-    
-
-t_val = 1 #change this variable based on the time snapshot
-
-# Numerical Solution
-data = scipy.io.loadmat('AC_R_1.mat')
-x = data['x']
-t = data['tt']
-u = data['uu']
-uexact = u[:,int(t_val*200)]
-
-
-# Neural Network Prediction
-xtest = torch.tensor(x.T,dtype=torch.float32)
-ttest = t_val*torch.ones(1,1)
-upred = spinn(xtest,ttest)    
-
-plot_ac(x,uexact,upred,t_val)
-
-# For 2D surface plot
-ttest = torch.tensor(t.T[:int(t_val*200)],dtype=torch.float32)
-upred = spinn(xtest,ttest)  
-plot_ac_cmap(x,t.T[:int(t_val*200)],u[:,:int(t_val*200)],upred)
-
 #%% Numerical Quadrature Testing
 def spinn_train_generator_AC2D(nc,dom):
     
@@ -488,6 +444,7 @@ _, _, xg, yg, _, _, h = spinn_train_generator_AC2D(512,[-1,1])
 
 f = torch.matmul((xg**2),(yg.T**2))
 g = torch.sum((h**2)*f)
+
 #%% Saving the Solution
 try:
     os.makedirs('./results_data_aux/AC_2D_IC1')

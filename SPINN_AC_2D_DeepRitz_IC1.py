@@ -1,5 +1,5 @@
 # Code for Separable PINN in PyTorch
-# Solving Linear Elasticity problem using separable deep ritz
+# Solving 2D Allen Cahn Equation using separable deep ritz
 
 # Details of the equation
 # u_t = lap(u) - (1/eps^2)*(u^2 - 1)*u; 

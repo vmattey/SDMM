@@ -313,8 +313,8 @@ epochs_spinn = 1001
 lbfgs_epochs = 31
 
 # Time Stepping
-tau = 2E-4
-nsteps = 1000 # Number of time steps to run
+dt = 2E-5
+nsteps = 300 # Number of time steps to run
 
 # NN Activation
 activation = 'gelu' # Choose either tanh or gelu
@@ -366,6 +366,10 @@ upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))
 
  
 for i in range(nsteps):
+    if i <= 100:
+        tau = dt
+    else:
+        tau = 10*dt
     xi, yi, ui, xgmesh, ygmesh = train_data_icgl
     ui = spinn(xi, yi)
     ui.detach_()
@@ -418,8 +422,6 @@ for i in range(nsteps):
 
 print('Total training time: ',time.time()-start)
 
-#%%
-
 path = '/home/vmattey/research/spinn/results_data_aux/'
 os.chdir(path)
 
@@ -440,3 +442,4 @@ scipy.io.savemat('loss_icgl.mat',loss_dict_icgl)
 
 loss_dict = {'loss_spinn':loss_array}
 scipy.io.savemat('loss_spinn.mat',loss_dict)
+

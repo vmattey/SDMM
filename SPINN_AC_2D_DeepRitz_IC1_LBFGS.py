@@ -29,8 +29,9 @@ SEED = 444
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('GPU: ', torch.cuda.is_available())
-print('Number of GPUs being used: ', torch.cuda.device_count())
-print('GPU Type: ', torch.cuda.get_device_name(0))
+if torch.cuda.is_available():
+    print('Number of GPUs being used: ', torch.cuda.device_count())
+    print('GPU Type: ', torch.cuda.get_device_name(0))
 
 ##############################################################
 # Neural Network definitions
@@ -244,8 +245,8 @@ def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss
     
     if epoch%100 == 0:
         print('Energy Loss:',ener_loss.detach().numpy(),', Bound Loss:',bound_loss.detach().numpy(),', Moving Loss:',moving_loss.detach().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
-        temp = [loss_value, ener_loss.detach().cpu().numpy(),bound_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
-        lossVal.append(temp)
+#        temp = [loss_value, ener_loss.detach().cpu().numpy(),bound_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
+#        lossVal.append(temp)
     
     loss_spinn.backward()
     
@@ -297,7 +298,7 @@ keys =  [g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED)
 
 
 # dataset
-nc = 1024 # user input
+nc = 256 # user input
 dom = [0, 1]
 
 # User Input for Size of Neural Network
@@ -307,12 +308,12 @@ output_size = 256
 
 # Epochs for training
 epochs_icgl = 20001
-# epochs_pinn = 2001
+epochs_spinn = 1001
 # epochs_pinn_init = 1001
 lbfgs_epochs = 31
 
 # Time Stepping
-tau = 2E-6
+tau = 2E-5
 nsteps = 1000 # Number of time steps to run
 
 # NN Activation
@@ -362,6 +363,7 @@ for epoch in range(epochs_icgl):
         scheduler_icgl.step()
         
 upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))   
+
  
 for i in range(nsteps):
     xi, yi, ui, xgmesh, ygmesh = train_data_icgl
@@ -381,12 +383,38 @@ for i in range(nsteps):
                 loss_spinn, ener_loss, _, moving_loss = loss_fn(spinn, spinn, tau, train_data_gauss, train_data_icgl)
                 temp = [loss_spinn.detach().cpu().numpy(), ener_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
                 lossVal.append(temp)
+    if i == 0:
+        loss_old = temp[0]
+    else: 
+        if temp[0] == loss_old:
+            loss_fn = spinn_loss
+            train_step(loss_fn,adam,epochs_spinn, lossVal, sol_list, tau, train_data_gauss, train_data_icgl)
+            for epoch in range(lbfgs_epochs):
+                    running_loss = 0.0
+                    # Update weights
+                    lbfgs.step(closure)
+                    # Update the running loss
+                    loss = closure()
+                    running_loss += loss.item()
+                    if epoch%10 == 0:
+                        print(f"Epoch: {epoch + 1:02}/{lbfgs_epochs:02} Loss: {running_loss:.5e}")
+                        loss_fn = spinn_loss
+                        loss_spinn, ener_loss, _, moving_loss = loss_fn(spinn, spinn, tau, train_data_gauss, train_data_icgl)
+                        temp = [loss_spinn.detach().cpu().numpy(), ener_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
+                        lossVal.append(temp)
+            loss_old = temp[0]
+        else:
+            loss_old = temp[0]
+        
+            
                 
     upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))     
     t += tau
     print('Sim Time: ', t)
 
 print('Total training time: ',time.time()-start)
+
+#%%
 
 path = '/home/vmattey/research/spinn/results_data_aux/'
 os.chdir(path)

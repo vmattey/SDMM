@@ -313,7 +313,7 @@ epochs_spinn = 1001
 lbfgs_epochs = 31
 
 # Time Stepping
-tau = 2E-5
+tau = 2E-4
 nsteps = 1000 # Number of time steps to run
 
 # NN Activation
@@ -337,7 +337,7 @@ spinn = torch.jit.script(spinn)
 
 # Define an optimizer
 adam = optim.Adam(spinn.parameters(),lr=0.001)  # You can adjust the learning rate (lr) as needed
-#scheduler = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_pinn)
+scheduler = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_spinn)
 #scheduler_init = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_pinn_init)
 scheduler_icgl = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_icgl)
 lbfgs = optim.LBFGS(
@@ -387,8 +387,12 @@ for i in range(nsteps):
         loss_old = temp[0]
     else: 
         if temp[0] == loss_old:
-            loss_fn = spinn_loss
-            train_step(loss_fn,adam,epochs_spinn, lossVal, sol_list, tau, train_data_gauss, train_data_icgl)
+            # Modify the code for ADAM to run for 1000 epochs
+            for epoch in range(epochs_spinn):
+                start_time = time.time()
+                loss_fn = spinn_loss
+                train_step(loss_fn,adam,epoch, lossVal, sol_list, tau, train_data_gauss, train_data_icgl)
+                scheduler.step()
             for epoch in range(lbfgs_epochs):
                     running_loss = 0.0
                     # Update weights

@@ -32,6 +32,17 @@ print('GPU: ', torch.cuda.is_available())
 if torch.cuda.is_available():
     print('Number of GPUs being used: ', torch.cuda.device_count())
     print('GPU Type: ', torch.cuda.get_device_name(0))
+##############################################################
+# Defining adaptive tanh activation function
+class AdaptiveTanh(nn.Module):
+    def __init__(self):
+        super(AdaptiveTanh, self).__init__()
+        self.alpha = nn.Parameter(torch.rand(1).to(device))
+    
+    def forward(self,val):
+        # Apply adaptive scaling to input before passing it to tanh
+        scaled_input = self.alpha * val
+        return torch.tanh(scaled_input)
 
 ##############################################################
 # Neural Network definitions
@@ -71,7 +82,7 @@ class Combined(nn.Module):
         self.model1 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         self.model2 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         #self.n = output_size
-        self.act= nn.Tanh()
+        self.act=AdaptiveTanh()
     
 
     def forward(self, x, y):
@@ -146,8 +157,8 @@ def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
 
     def energy_loss(x,y,h):
         u = apply_fn(x,y)
-        v_x = torch.ones(x.shape)
-        v_y = torch.ones(y.shape)
+        v_x = torch.ones(x.shape).to(device)
+        v_y = torch.ones(y.shape).to(device)
         ux =  ft.jvp(lambda x: ad_fn(x,y), (x,), (v_x,))[1]
         uy =  ft.jvp(lambda y: ad_fn(x,y), (y,), (v_y,))[1]
         f = (h**2)*(0.5*(ux**2+uy**2) + 2500*(u**2 - 1)**2)
@@ -244,7 +255,7 @@ def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss
     loss_value = loss_spinn.detach().cpu().numpy()
     
     if epoch%100 == 0:
-        print('Energy Loss:',ener_loss.detach().numpy(),', Bound Loss:',bound_loss.detach().numpy(),', Moving Loss:',moving_loss.detach().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
+        print('Energy Loss:',ener_loss.detach().cpu().numpy(),', Moving Loss:',moving_loss.detach().cpu().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
 #        temp = [loss_value, ener_loss.detach().cpu().numpy(),bound_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
 #        lossVal.append(temp)
     
@@ -264,7 +275,7 @@ def train_step_icgl(loss_fn,optimizer,epoch,lossVal_icgl,train_data_icgl):
     loss_value = loss_ic.detach().cpu().numpy()
     
     if epoch%1000 == 0:
-        print(' Total Loss:',loss_value, ', iter:', epoch)
+        print(' Total Loss:',loss_value, ', iter:', epoch, ', alpha:', spinn.act.alpha.item())
         
     if epoch%100 == 0:
         lossVal_icgl.append(loss_value)
@@ -298,7 +309,7 @@ keys =  [g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED)
 
 
 # dataset
-nc = 256 # user input
+nc = 1024# user input
 dom = [0, 1]
 
 # User Input for Size of Neural Network
@@ -308,7 +319,7 @@ output_size = 256
 
 # Epochs for training
 epochs_icgl = 20001
-epochs_spinn = 1001
+epochs_spinn = 2001
 # epochs_pinn_init = 1001
 lbfgs_epochs = 31
 
@@ -320,7 +331,7 @@ nsteps = 300 # Number of time steps to run
 activation = 'gelu' # Choose either tanh or gelu
 
 # Grid for Solution
-N = 512 # Number of Elements in each spatial direction
+N = 1024 # Number of Elements in each spatial direction
 xgrid = torch.linspace(dom[0], dom[1], N+1).to(device)
 ygrid = torch.linspace(dom[0], dom[1], N+1).to(device)
 t = 0
@@ -331,7 +342,7 @@ train_data_icgl = icgl_train_generator_AC2D(nc,dom)
 
 # Create an instance of the neural network
 spinn = Combined(input_size,hidden_sizes,output_size, activation).to(device)
-spinn = torch.jit.script(spinn)
+#spinn = torch.jit.script(spinn)
 #spinn.apply(init_weights)
 
 
@@ -366,7 +377,7 @@ upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))
 
  
 for i in range(nsteps):
-    if i <= 100:
+    if i < 100:
         tau = dt
     else:
         tau = 10*dt
@@ -422,7 +433,7 @@ for i in range(nsteps):
 
 print('Total training time: ',time.time()-start)
 
-path = '/home/vmattey/research/spinn/results_data_aux/'
+path = '/home/vmattey/research/spinn/results_data_aux/N_1024'
 os.chdir(path)
 
 import scipy.io
@@ -431,15 +442,15 @@ for u in upred:
     u_pred.append(u.detach().cpu().numpy())
 
 uu = {'upred':u_pred}
-scipy.io.savemat('upred_2D_IC1.mat',uu)
+scipy.io.savemat('upred_2D_IC1_adaptact_v1.mat',uu)
 
 
 loss_array_icgl = np.array(lossVal_icgl)
 loss_array = np.array(lossVal)
 
 loss_dict_icgl = {'loss_icgl':loss_array_icgl}
-scipy.io.savemat('loss_icgl.mat',loss_dict_icgl)
+scipy.io.savemat('loss_icgl_v1.mat',loss_dict_icgl)
 
 loss_dict = {'loss_spinn':loss_array}
-scipy.io.savemat('loss_spinn.mat',loss_dict)
+scipy.io.savemat('loss_spinn_v1.mat',loss_dict)
 

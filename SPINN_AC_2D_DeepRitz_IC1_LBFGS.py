@@ -275,7 +275,7 @@ def train_step_icgl(loss_fn,optimizer,epoch,lossVal_icgl,train_data_icgl):
     loss_value = loss_ic.detach().cpu().numpy()
     
     if epoch%1000 == 0:
-        print(' Total Loss:',loss_value, ', iter:', epoch, ', alpha:', spinn.act.alpha.item())
+        print(' Total Loss:',loss_value, ', iter:', epoch)
         
     if epoch%100 == 0:
         lossVal_icgl.append(loss_value)
@@ -366,6 +366,7 @@ lossVal_icgl = []
 sol_list = []
 upred = []
 start = time.time()
+alpha = []
 # Training with ADAM for Initial Condition
 for epoch in range(epochs_icgl):
         start_time = time.time()
@@ -374,7 +375,7 @@ for epoch in range(epochs_icgl):
         scheduler_icgl.step()
         
 upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))   
-
+alpha.append(spinn.act.alpha.item())
  
 for i in range(nsteps):
     if i < 100:
@@ -427,30 +428,37 @@ for i in range(nsteps):
         
             
                 
-    upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))     
+    upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))
+    alpha.append(spinn.act.alpha.item())
     t += tau
     print('Sim Time: ', t)
 
 print('Total training time: ',time.time()-start)
 
-path = '/home/vmattey/research/spinn/results_data_aux/N_1024'
+path = '/home/vmattey/research/spinn/results_data_aux/N_1024/'
 os.chdir(path)
 
 import scipy.io
 u_pred = []
+
 for u in upred:
     u_pred.append(u.detach().cpu().numpy())
 
 uu = {'upred':u_pred}
-scipy.io.savemat('upred_2D_IC1_adaptact_v1.mat',uu)
+scipy.io.savemat('upred_2D_IC1_adaptTanh.mat',uu)
 
 
 loss_array_icgl = np.array(lossVal_icgl)
 loss_array = np.array(lossVal)
+alpha_array = np.array(alpha)
 
 loss_dict_icgl = {'loss_icgl':loss_array_icgl}
-scipy.io.savemat('loss_icgl_v1.mat',loss_dict_icgl)
+scipy.io.savemat('loss_icgl_adaptTanh.mat',loss_dict_icgl)
 
 loss_dict = {'loss_spinn':loss_array}
-scipy.io.savemat('loss_spinn_v1.mat',loss_dict)
+scipy.io.savemat('loss_spinn_adaptTanh.mat',loss_dict)
+
+alpha_dict = {'alpha':alpha_array}
+scipy.io.savemat('alpha_adaptTanh.mat',alpha_dict)
+
 

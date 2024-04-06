@@ -1,14 +1,20 @@
-# Code for Separable PINN in PyTorch
-# Solving 2D Allen Cahn equation  using separable deep ritz
+#!/usr/bin/env python
+# coding: utf-8
 
-# Details of the equation
-# u_t = lap(u) - (1/eps^2)*(u^2 - 1)*u; 
-# x,y = [0,1] x [0,1], tspan = [0 0.022], eps = 0.01
-# u, grad(u) periodic on the boundary
-# u0 = 0.02cos(4*pi*x)cos(8*pi*y) - 0.02cos(6*pi*x)cos(2*pi*y) + 0.01cos(10*pi*x)cos(4*pi*y) + 0.02cos(6*pi*x)cos(6*pi*y)
+# <a href="https://colab.research.google.com/github/vmattey/SeparablePINN_AC_Codes/blob/main/SPINN_AC_2D_DeepRitz_IC2.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 
-
-
+# # Code for Separable PINN in PyTorch
+# Solving 2D Allen Cahn Equation using separable Deep Ritz
+# 
+# # Details of the equation
+# $u_t = ∇^2u - (1/ϵ^2)*(u^2 - 1)*u$
+# 
+# *   $x,y = [0,1] × [0,1] $, $t = [0, 0.022]$
+# *   $ϵ = 0.01$
+# *   BC: No Flux
+# *   Initial Condition: $u_0$ = $0.02\cos(4πx)\cos(8πy) - 0.02\cos(6πx)\cos(2πy) + 0.01\cos(10πx)\cos(4πy) + 0.02\cos(6πx)\cos(6πy)$
+# 
+# 
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
@@ -23,36 +29,37 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator
 import torch.optim.lr_scheduler as lr_scheduler
-import os
 # Seed for randomizzation
 SEED = 444
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print('GPU: ', torch.cuda.is_available())
 if torch.cuda.is_available():
     print('Number of GPUs being used: ', torch.cuda.device_count())
     print('GPU Type: ', torch.cuda.get_device_name(0))
-##############################################################
+
+
+# In[85]:
+
+
 # Defining adaptive tanh activation function
 class AdaptiveTanh(nn.Module):
     def __init__(self):
         super(AdaptiveTanh, self).__init__()
         self.alpha = nn.Parameter(torch.rand(1).to(device))
-    
+
     def forward(self,val):
         # Apply adaptive scaling to input before passing it to tanh
         scaled_input = self.alpha * val
         return torch.tanh(scaled_input)
 
-##############################################################
 # Neural Network definitions
 class NeuralNetwork(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation='gelu'):
-        super(NeuralNetwork, self).__init__()      
+        super(NeuralNetwork, self).__init__()
         self.input_size = input_size
         self.hidden_sizes = hidden_sizes
         self.output_size = output_size
-        
+
         # Create a list of hidden layers based on user-defined sizes
         self.hidden_layers = nn.ModuleList()
         prev_size = input_size  # Initialize the input size
@@ -65,40 +72,45 @@ class NeuralNetwork(nn.Module):
         else:
             self.act_fun = nn.GELU()
 
+        self.out_act_fun = nn.Tanh()
         self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
 
-    
+
 
     def forward(self, X):
         for layer in self.hidden_layers:
             X = self.act_fun(layer(X))
+        #X = self.output_layer(X)
         X = self.output_layer(X)
         return X
-    
 
-class Combined(nn.Module):            
+
+class Combined(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation):
         super(Combined, self).__init__()
         self.model1 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         self.model2 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         #self.n = output_size
-        self.act=AdaptiveTanh()
-    
-
+        self.act = nn.Tanh()
+        
     def forward(self, x, y):
         model1_output = self.model1(x)
         model2_output = self.model2(y)
-        
+
         u = torch.matmul(model1_output, model2_output.T)
         u_scaled = self.act(u)
         return u_scaled
- 
+
+
+# In[86]:
+
+
 ##############################################################
-# Auxillary Functions    
+# Auxillary Functions
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_normal_(m.weight)
-        
+
 
 def hvp_fwdfwd(f, primals, tangents, return_primals=False):
     g = lambda primals: ft.jvp(f, (primals,), (tangents,))[1]
@@ -107,12 +119,16 @@ def hvp_fwdfwd(f, primals, tangents, return_primals=False):
         return primals_out, tangents_out
     else:
         return tangents_out
-    
+
+
+# In[87]:
+
+
 ##############################################################
 # Loss Functions
 
 def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
-    
+
     def residual_loss(x,t):
         # calculate u
         u = apply_fn(x,t)
@@ -123,36 +139,36 @@ def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
         ux,uxx = hvp_fwdfwd(lambda x: ad_fn(x,t), x, v,return_primals=True)
         ut = ft.jvp(lambda t: ad_fn(x,t), (t,), (v,))[1]
         #return torch.mean((ut-0.0001*uxx+5*(u**3-u))**2) - 1e-6*(torch.mean(torch.log10(u**2 + ux**2 + uxx**2)) + torch.mean(torch.log10((u-1)**2 + ux**2 + uxx**2))  + torch.mean(torch.log10((u+1)**2 + ux**2 + uxx**2)))
-        return torch.mean((ut-0.0001*uxx+5*(u**3-u))**2) 
-    
-    
+        return torch.mean((ut-0.0001*uxx+5*(u**3-u))**2)
+
+
     def initial_loss(x,t,u):
         return torch.mean((apply_fn(x,t) - u)**2)
-    
+
 
     def moving_loss(x,y,u,tau,h):
         return torch.sum((h**2)*(apply_fn(x,y) - u)**2)/(2*tau)
-    
+
 
     def boundary_loss(x,y):
-        
+
         loss_u = 0
         loss_ux = 0
         loss_uy = 0
         for i in range(2):
             loss_u += torch.mean((apply_fn(x[i],y[i]) - apply_fn(x[i+2],y[i+2]))**2)
-            
+
             # v_x = torch.ones(x[i].shape)
             # v_y = torch.ones(y[i].shape)
             # ux_lb =  ft.jvp(lambda x: ad_fn(x,y[i]), (x[i],), (v_x,))[1]
             # ux_ub =  ft.jvp(lambda x: ad_fn(x,y[i+2]), (x[i+2],), (v_x,))[1]
-            
+
             # uy_lb =  ft.jvp(lambda y: ad_fn(x[i],y), (y[i],), (v_y,))[1]
             # uy_ub =  ft.jvp(lambda y: ad_fn(x[i+2],y), (y[i+2],), (v_y,))[1]
-            
+
             # loss_ux += torch.mean((ux_lb - ux_ub)**2)
             # loss_uy += torch.mean((uy_lb - uy_ub)**2)
-        
+
         return loss_u + loss_ux + loss_uy
 
     def energy_loss(x,y,h):
@@ -164,8 +180,8 @@ def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
         f = (h**2)*(0.5*(ux**2+uy**2) + 2500*(u**2 - 1)**2)
         #f= h*(0.5*u**2)
         return torch.sum(f)
-    
-    
+
+
     # unpack data
     xd, yd, xg, yg, xb, yb, h = train_data
     xi, yi, ui, _, _ = train_data_ic
@@ -176,24 +192,28 @@ def spinn_loss(apply_fn, ad_fn, tau, train_data, train_data_ic):
     ener_loss = energy_loss(xg, yg, h)
     bound_loss = boundary_loss(xb,yb)
     loss = ener_loss + moving_loss
-    
+
     return loss.to(device), ener_loss, bound_loss, moving_loss
- 
+
 
 def icgl_loss(apply_fn, train_data_icgl):
     x, y, u, _, _ = train_data_icgl
     loss = 0.5*torch.mean((apply_fn(x,y) - u)**2) + 0.5*torch.mean(torch.abs(apply_fn(x,y) - u))
     return loss.to(device)
 
+
+# In[88]:
+
+
 ##############################################################
 # Training Data Generation
 
 def spinn_train_generator_AC2D(nc,dom):
-    
+
     # Domain Points
     xd = torch.linspace(dom[0], dom[1], nc+1)
     yd = xd
-    
+
     # Gauss points
     xleft = xd[:-1]
     xright = xd[1:]
@@ -201,23 +221,23 @@ def spinn_train_generator_AC2D(nc,dom):
     xg1 = -(1/3**0.5)*(xright - xleft)/2 + (xright + xleft)/2
     xg2 = (1/3**0.5)*(xright - xleft)/2 + (xright + xleft)/2
     xg[0:-1:2,0] = xg1
-    xg[1::2,0] = xg2   
+    xg[1::2,0] = xg2
     yg = xg
-    
+
     # Boundary points
     temp = dom[0] + (dom[1]-dom[0])*torch.rand((nc, 1)).to(device)
     xb = [dom[1]*torch.ones(1,1).to(device), temp, -dom[0]*torch.ones(1,1).to(device), temp]
-    yb = [temp, dom[1]*torch.ones(1,1).to(device), temp, -dom[0]*torch.ones(1,1).to(device)] 
-    
+    yb = [temp, dom[1]*torch.ones(1,1).to(device), temp, -dom[0]*torch.ones(1,1).to(device)]
+
     h = (xd[2] - xd[1])/2
-    
+
     return xd.to(device), yd.to(device), xg.to(device), yg.to(device), xb, yb, h.to(device)
 
 def icgl_train_generator_AC2D(nc,dom):
-    
+
     # Domain Points
     xd = torch.linspace(dom[0], dom[1], nc+1)
-        
+
     # Gauss points
     xleft = xd[:-1]
     xright = xd[1:]
@@ -225,68 +245,74 @@ def icgl_train_generator_AC2D(nc,dom):
     xg1 = -(1/3**0.5)*(xright - xleft)/2 + (xright + xleft)/2
     xg2 = (1/3**0.5)*(xright - xleft)/2 + (xright + xleft)/2
     xg[0:-1:2,0] = xg1
-    xg[1::2,0] = xg2   
+    xg[1::2,0] = xg2
     yg = xg
-    
+
     # Initial points
     xi = xg
     yi = yg
-   
-    # Generating random initial condition 
-   
+
+    # Generating random initial condition
+    # uxi = (xi**2)*torch.cos(torch.pi*xi)*torch.exp(-xi**2)
+    # uyi  = (yi**2)*torch.cos(torch.pi*yi)*torch.exp(-yi**2)
+    # uxi = torch.sin(torch.pi*xi)
+    # uyi = torch.cos(torch.pi*yi)
+    # ui = torch.matmul(uxi, uyi.T)
+
     xgmesh_np, ygmesh_np = np.meshgrid(xg.detach().numpy(),yg.detach().numpy(), indexing='ij')
     xgmesh = torch.Tensor(xgmesh_np)
     ygmesh = torch.Tensor(ygmesh_np)
+
     ui = 0.02*torch.cos(4*np.pi*xgmesh)*torch.cos(8*np.pi*ygmesh) - 0.02*torch.cos(6*np.pi*xgmesh)*torch.cos(2*np.pi*ygmesh) + \
-        0.01*torch.cos(10*np.pi*xgmesh)*torch.cos(4*np.pi*ygmesh) + 0.02*torch.cos(6*np.pi*xgmesh)*torch.cos(6*np.pi*ygmesh)
-    
-    # ui = torch.exp(-xgmesh**2)*torch.cos(torch.pi*xgmesh)*torch.exp(-ygmesh**2)*torch.cos(torch.pi*ygmesh)*(xgmesh**2)*(ygmesh**2)
-                
+    0.01*torch.cos(10*np.pi*xgmesh)*torch.cos(4*np.pi*ygmesh) + 0.02*torch.cos(6*np.pi*xgmesh)*torch.cos(6*np.pi*ygmesh)
+
+
     return xi.to(device), yi.to(device), ui.to(device), xgmesh.to(device), ygmesh.to(device)
+
+
+# In[89]:
+
 
 ##############################################################
 # Optimization Steps
 def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss, train_data_icgl):
     # clear the gradients
     optimizer.zero_grad()
-    
+
     # Losstorch.jit.script(torch.jit.script(
     loss_spinn, ener_loss, bound_loss, moving_loss = loss_fn(spinn, spinn, tau, train_data_gauss, train_data_icgl)
     loss_value = loss_spinn.detach().cpu().numpy()
-    
+
     if epoch%100 == 0:
-        print('Energy Loss:',ener_loss.detach().cpu().numpy(),', Moving Loss:',moving_loss.detach().cpu().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
-#        temp = [loss_value, ener_loss.detach().cpu().numpy(),bound_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
-#        lossVal.append(temp)
-    
+        print('Energy Loss:',ener_loss.detach().cpu().numpy(),', Bound Loss:',bound_loss.detach().cpu().numpy(),', Moving Loss:',moving_loss.detach().cpu().numpy(),', Total Loss:',loss_value, ', iter:', epoch)
+
     loss_spinn.backward()
-    
+
     # Update model weights
     optimizer.step()
-    
+
     return loss_spinn
 
 def train_step_icgl(loss_fn,optimizer,epoch,lossVal_icgl,train_data_icgl):
     # clear the gradients
     optimizer.zero_grad()
-    
+
     # Loss
     loss_ic = loss_fn(spinn, train_data_icgl)
     loss_value = loss_ic.detach().cpu().numpy()
-    
+
     if epoch%1000 == 0:
         print(' Total Loss:',loss_value, ', iter:', epoch)
-        
+
     if epoch%100 == 0:
         lossVal_icgl.append(loss_value)
-    
+
     loss_ic.backward()
-    
+
     # Update model weights
     optimizer.step()
-    
-    return loss_ic
 
+    return loss_ic
 
 def closure():
     # Zero gradients
@@ -301,15 +327,18 @@ def closure():
     return loss
 
 
+# In[ ]:
+
+
 ##############################################################
 # Defining variables and the network
 # random key
 g_cpu = torch.Generator()
 keys =  [g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED),g_cpu.manual_seed(SEED)]
-
+path = '/home/vmattey/research/spinn/results_data_aux/N_128'
 
 # dataset
-nc = 1024# user input
+nc = 2048 # user input
 dom = [0, 1]
 
 # User Input for Size of Neural Network
@@ -324,25 +353,25 @@ epochs_spinn = 2001
 lbfgs_epochs = 31
 
 # Time Stepping
-dt = 2E-5
-nsteps = 300 # Number of time steps to run
+dt = 5E-5
+nsteps = 800 # Number of time steps to run
+ratio = 1
 
 # NN Activation
 activation = 'gelu' # Choose either tanh or gelu
 
-# Grid for Solution
+# Grid for saving and predicting the solution
 N = 1024 # Number of Elements in each spatial direction
 xgrid = torch.linspace(dom[0], dom[1], N+1).to(device)
 ygrid = torch.linspace(dom[0], dom[1], N+1).to(device)
 t = 0
-
 
 train_data_gauss = spinn_train_generator_AC2D(nc,dom)
 train_data_icgl = icgl_train_generator_AC2D(nc,dom)
 
 # Create an instance of the neural network
 spinn = Combined(input_size,hidden_sizes,output_size, activation).to(device)
-#spinn = torch.jit.script(spinn)
+# spinn = torch.jit.script(spinn)
 #spinn.apply(init_weights)
 
 
@@ -352,8 +381,8 @@ scheduler = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters
 #scheduler_init = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_pinn_init)
 scheduler_icgl = lr_scheduler.LinearLR(adam,start_factor=1,end_factor=0.1,total_iters=epochs_icgl)
 lbfgs = optim.LBFGS(
-    spinn.parameters(), 
-    lr = 1.0, 
+    spinn.parameters(),
+    lr = 1.0,
     max_iter=50000,
     max_eval=50000,
     history_size=50,
@@ -366,22 +395,20 @@ lossVal_icgl = []
 sol_list = []
 upred = []
 start = time.time()
-alpha = []
 # Training with ADAM for Initial Condition
 for epoch in range(epochs_icgl):
         start_time = time.time()
         loss_fn = icgl_loss
         train_step_icgl(loss_fn,adam,epoch,lossVal_icgl,train_data_icgl)
         scheduler_icgl.step()
-        
-upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))   
-alpha.append(spinn.act.alpha.item())
- 
+
+upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))
+
 for i in range(nsteps):
     if i < 100:
         tau = dt
     else:
-        tau = 10*dt
+        tau = ratio*dt
     xi, yi, ui, xgmesh, ygmesh = train_data_icgl
     ui = spinn(xi, yi)
     ui.detach_()
@@ -399,66 +426,87 @@ for i in range(nsteps):
                 loss_spinn, ener_loss, _, moving_loss = loss_fn(spinn, spinn, tau, train_data_gauss, train_data_icgl)
                 temp = [loss_spinn.detach().cpu().numpy(), ener_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
                 lossVal.append(temp)
-    if i == 0:
-        loss_old = temp[0]
-    else: 
-        if temp[0] == loss_old:
-            # Modify the code for ADAM to run for 1000 epochs
-            for epoch in range(epochs_spinn):
-                start_time = time.time()
-                loss_fn = spinn_loss
-                train_step(loss_fn,adam,epoch, lossVal, sol_list, tau, train_data_gauss, train_data_icgl)
-                scheduler.step()
-            for epoch in range(lbfgs_epochs):
-                    running_loss = 0.0
-                    # Update weights
-                    lbfgs.step(closure)
-                    # Update the running loss
-                    loss = closure()
-                    running_loss += loss.item()
-                    if epoch%10 == 0:
-                        print(f"Epoch: {epoch + 1:02}/{lbfgs_epochs:02} Loss: {running_loss:.5e}")
-                        loss_fn = spinn_loss
-                        loss_spinn, ener_loss, _, moving_loss = loss_fn(spinn, spinn, tau, train_data_gauss, train_data_icgl)
-                        temp = [loss_spinn.detach().cpu().numpy(), ener_loss.detach().cpu().numpy(),moving_loss.detach().cpu().numpy()]
-                        lossVal.append(temp)
-            loss_old = temp[0]
-        else:
-            loss_old = temp[0]
-        
-            
-                
+
     upred.append(spinn(xgrid.reshape(N+1,1),ygrid.reshape(N+1,1)))
-    alpha.append(spinn.act.alpha.item())
+    if (i+1)%10==0: 
+        u_pred = []
+        for u in upred:
+            u_pred.append(u.detach().cpu().numpy())
+        uu = {'upred':u_pred}
+        name_simulation = "upred_2D_IC1_Tanh_{}.mat".format(str(i+1).replace(".","p"))
+        scipy.io.savemat(path+name_simulation,uu)
+        upred = []
+    
     t += tau
     print('Sim Time: ', t)
 
 print('Total training time: ',time.time()-start)
 
-path = '/home/vmattey/research/spinn/results_data_aux/N_1024/'
-os.chdir(path)
+
+loss_array_icgl = np.array(lossVal_icgl)
+loss_array = np.array(lossVal)
+
+loss_dict_icgl = {'loss_icgl':loss_array_icgl}
+scipy.io.savemat(path+'loss_icgl_adaptTanh.mat',loss_dict_icgl)
+
+loss_dict = {'loss_spinn':loss_array}
+scipy.io.savemat(path+'loss_spinn_adaptTanh.mat',loss_dict)
+
+
+# ## Model Saving Utilities
+
+# In[10]:
+
+
+path = '/home/vmattey/research/spinn/results_data_aux/N_128'
 
 import scipy.io
 u_pred = []
-
 for u in upred:
     u_pred.append(u.detach().cpu().numpy())
 
 uu = {'upred':u_pred}
-scipy.io.savemat('upred_2D_IC1_adaptTanh.mat',uu)
-
+scipy.io.savemat(path+'upred_2D_IC1_Tanh.mat',uu)
 
 loss_array_icgl = np.array(lossVal_icgl)
 loss_array = np.array(lossVal)
-alpha_array = np.array(alpha)
 
 loss_dict_icgl = {'loss_icgl':loss_array_icgl}
-scipy.io.savemat('loss_icgl_adaptTanh.mat',loss_dict_icgl)
+scipy.io.savemat(path+'loss_icgl_Tanh.mat',loss_dict_icgl)
 
 loss_dict = {'loss_spinn':loss_array}
-scipy.io.savemat('loss_spinn_adaptTanh.mat',loss_dict)
+scipy.io.savemat(path+'loss_spinn_Tanh.mat',loss_dict)
 
-alpha_dict = {'alpha':alpha_array}
-scipy.io.savemat('alpha_adaptTanh.mat',alpha_dict)
+
+# ## Plotting results for Deep Ritz Testing
+
+# In[83]:
+
+
+step = 1
+
+xgrid = torch.linspace(-1, 1, N+1).resize(N+1,1)
+ygrid = torch.linspace(-1, 1, N+1).resize(N+1,1)
+xmesh, ymesh = np.meshgrid(xgrid.detach().numpy(),ygrid.detach().numpy())
+ypred = upred[step-1]
+
+fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+plt.figure()
+plt.pcolor(xmesh, ymesh, ypred.detach().cpu().numpy(), cmap = 'turbo', label ='Predicted')
+plt.colorbar()
+
+plt.figure()
+surf = ax.plot_surface(xmesh, ymesh, ypred.detach().cpu().numpy(), cmap=cm.coolwarm,
+                       linewidth=0, antialiased=False)
+
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+
+fig.colorbar(surf, shrink=0.5, aspect=5)
+
+
+# In[ ]:
+
+
 
 

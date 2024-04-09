@@ -14,11 +14,8 @@
 # *   BC: grad(u).n = 0 ---> No flux on the boundary
 # *   Initial Condition: $u_0 = \frac{\tanh(R_0 + 0.1 \cos(7 \theta) - \sqrt{(x-0.5)^2 + (y-0.5)^2})}{\sqrt{2}\epsilon}$
 # 
-# 
-
-# In[1]:
-
-
+#
+ 
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
@@ -40,9 +37,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     print('Number of GPUs being used: ', torch.cuda.device_count())
     print('GPU Type: ', torch.cuda.get_device_name(0))
-
-
-# In[2]:
 
 
 # Defining adaptive tanh activation function
@@ -95,7 +89,7 @@ class Combined(nn.Module):
         self.model1 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         self.model2 = NeuralNetwork(input_size, hidden_sizes, output_size, activation)
         #self.n = output_size
-        self.act=AdaptiveTanh()
+        self.act=nn.Tanh()
     
 
     def forward(self, x, y):
@@ -105,9 +99,6 @@ class Combined(nn.Module):
         u = torch.matmul(model1_output, model2_output.T)
         u_scaled = self.act(u)
         return u_scaled
-
-
-# In[3]:
 
 
 ##############################################################
@@ -124,10 +115,6 @@ def hvp_fwdfwd(f, primals, tangents, return_primals=False):
         return primals_out, tangents_out
     else:
         return tangents_out
-
-
-# In[4]:
-
 
 ##############################################################
 # Loss Functions
@@ -207,10 +194,6 @@ def icgl_loss(apply_fn, train_data_icgl):
     loss = torch.mean((apply_fn(x,y) - u)**2) 
     return loss.to(device)
 
-
-# In[5]:
-
-
 ##############################################################
 # Training Data Generation
 
@@ -266,9 +249,6 @@ def icgl_train_generator_AC2D(nc,dom):
     return xi.to(device), yi.to(device), ui.to(device), xgmesh.to(device), ygmesh.to(device)
 
 
-# In[6]:
-
-
 ##############################################################
 # Optimization Steps
 def train_step(loss_fn,optimizer,epoch, lossVal, sol_list, tau, train_data_gauss, train_data_icgl):
@@ -321,9 +301,6 @@ def closure():
     loss.backward()
 
     return loss
-
-
-# In[ ]:
 
 
 ##############################################################
@@ -435,7 +412,7 @@ for i in range(nsteps):
         for u in upred:
             u_pred.append(u.detach().cpu().numpy())
         uu = {'upred':u_pred}
-        name_simulation = "upred_2D_IC3_adaptTanh_{}.mat".format(str(i+1).replace(".","p"))
+        name_simulation = "upred_2D_IC3_Tanh_{}.mat".format(str(i+1).replace(".","p"))
         scipy.io.savemat(path+name_simulation,uu)
         upred = []
         
@@ -448,66 +425,7 @@ loss_array_icgl = np.array(lossVal_icgl)
 loss_array = np.array(lossVal)
 
 loss_dict_icgl = {'loss_icgl':loss_array_icgl}
-scipy.io.savemat(path+'loss_icgl_adaptTanh.mat',loss_dict_icgl)
+scipy.io.savemat(path+'loss_icgl_Tanh.mat',loss_dict_icgl)
 
 loss_dict = {'loss_spinn':loss_array}
-scipy.io.savemat(path+'loss_spinn_adaptTanh.mat',loss_dict)
-
-
-# ## Model Saving Utilities
-
-# In[52]:
-
-
-path = '/pscratch/sd/v/vmattey/SPINN_AC_2D/results_data_aux/AC_2D_IC3/N_2048/'
-
-import scipy.io
-u_pred = []
-for u in upred:
-    u_pred.append(u.detach().cpu().numpy())
-
-uu = {'upred':u_pred}
-scipy.io.savemat(path+'upred_2D_IC3_adaptTanh.mat',uu)
-
-loss_array_icgl = np.array(lossVal_icgl)
-loss_array = np.array(lossVal)
-
-loss_dict_icgl = {'loss_icgl':loss_array_icgl}
-scipy.io.savemat(path+'loss_icgl_adaptTanh.mat',loss_dict_icgl)
-
-loss_dict = {'loss_spinn':loss_array}
-scipy.io.savemat(path+'loss_spinn_adaptTanh.mat',loss_dict)
-
-
-# ## Plotting results for Deep Ritz Testing
-
-# In[62]:
-
-
-step = 750
-xgrid = torch.linspace(0, 1, N+1).resize(N+1,1)
-ygrid = torch.linspace(0, 1, N+1).resize(N+1,1)
-xmesh, ymesh = np.meshgrid(xgrid.detach().numpy(),ygrid.detach().numpy())
-ypred = upred[step-1]
-#ypred = ui
-
-fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-plt.figure()
-plt.pcolor(xmesh, ymesh, ypred.detach().cpu().numpy(), cmap = 'turbo', label ='Predicted')
-plt.colorbar()
-
-plt.figure()
-surf = ax.plot_surface(xmesh, ymesh, ypred.detach().cpu().numpy(), cmap=cm.coolwarm,
-                       linewidth=0, antialiased=False)
-
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-
-fig.colorbar(surf, shrink=0.5, aspect=5)
-
-
-# In[ ]:
-
-
-
-
+scipy.io.savemat(path+'loss_spinn_Tanh.mat',loss_dict)
